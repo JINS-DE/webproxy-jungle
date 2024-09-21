@@ -73,7 +73,10 @@ void get_filetype(char *filename, char *filetype);        // 파일의 MIME 타�
 void serve_dynamic(int fd, char *filename, char *cgiargs);// CGI 프로그램을 실행하는 동적 콘텐츠 제공 함수
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg); // 클라이언트에게 에러 메시지를 전송하는 함수
 
+// argc : 명령줄에서 전달된 인수의 개수 예시) ./tiny 8080 이면 argc는 2
+// argv : 명령줄에서 전달된 인수의 배열 argv[0]="./tiny" , argv[1]="8080"
 int main(int argc, char **argv) {
+  signal(SIGPIPE, SIG_IGN);               // SIGPIPE 에러무시
   int listenfd, connfd;                   // listen 소켓과 클라이언트와의 연결 소켓을 저장할 변수
   char hostname[MAXLINE], port[MAXLINE];  // 클라이언트의 호스트 이름과 포트 번호를 저장할 버퍼
   socklen_t clientlen;                    // 클라이언트 소켓 주소의 길이를 저장할 변수
@@ -109,7 +112,6 @@ void doit(int fd)
     char filename[MAXLINE], cgiargs[MAXLINE];
     // Robust I/O 버퍼 구조체
     rio_t rio;
-
     
     Rio_readinitb(&rio, fd);  // fd와 연관된 Robust I/O 읽기 버퍼 초기화
     if (!Rio_readlineb(&rio, buf, MAXLINE)) // 클라이언트로부터 요청 라인을 읽어 buf에 저장
