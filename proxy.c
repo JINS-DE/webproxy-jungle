@@ -23,7 +23,7 @@ int main(int argc, char **argv) {
   // 실행 시 포트 번호가 제대로 전달되지 않으면 사용법을 출력하고 종료
   if (argc != 2) { 
     fprintf(stderr, "usage: %s <port>\n", argv[0]);
-    exit(1);}//프로그램 종료
+    exit(0);}//프로그램 종료
 
   listenfd = Open_listenfd(argv[1]); // 포트 번호를 사용하여 리슨 소켓을 오픈 (서버가 대기할 준비)
 
@@ -43,7 +43,7 @@ void doit(int fd)
 {
     int serverfd;
     // request line에서 메서드, URI, 버전 정보를 저장할 변수들
-    char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE],host[MAXLINE],hostname[MAXLINE],path[MAXLINE],port[MAXLINE],server_request[MAXLINE];
+    char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE],host[MAXLINE],hostname[MAXLINE],path[MAXLINE],port[MAXLINE],server_request[MAXLINE], to_client_request[MAXLINE];
     // Robust I/O 버퍼 구조체
     rio_t rio_client, rio_server;
 
@@ -68,30 +68,49 @@ void doit(int fd)
     }
 
     // 요청 헤더 처리
-    sprintf(server_request,"%s %s HTTP/1.0\r\n",method,path);
-    sprintf(server_request,"%sHost:%s\r\n",server_request,hostname);
-    sprintf(server_request,"%sUser-Agent:%s\r\n",server_request,user_agent_hdr);
-    sprintf(server_request,"%sConnection: close\r\n",server_request);
-    sprintf(server_request,"%sProxy-Connection: close\r\n",server_request);
-    // 브라우저의 추가적인 http 요청 처리
+    sprintf(server_request, "%s %s HTTP/1.0\r\n", method, path);
+    sprintf(server_request, "%sHost: %s\r\n", server_request, hostname);
 
-    int n;
-    while (Rio_readlineb(&rio_client, buf, MAXLINE)){
-      if (strstr(buf,"\r\n\r\n")){break;}
-      printf("%s",buf);
-      // char *tmp;
-      // char key;
-      // tmp=strchr(buf,':');
-      // *tmp='\0';
-      // strcpy(key,buf);
-      // printf(key);
-      
+    while (Rio_readlineb(&rio_client, buf, MAXLINE) > 0) {
+        if (strcmp(buf, "\r\n") == 0) {
+            break; // 헤더 종료
+        }
+
+        char *colon_pos = strchr(buf, ':');
+        if (colon_pos) {
+            *colon_pos = '\0'; // ':'를 잠시 null로 바꿈
+            char key[MAXLINE];
+            strcpy(key, buf);
+
+            *colon_pos = ':'; // ':'를 다시 복구
+
+            if (strcmp(key, "Host") == 0 ||
+              strcmp(key, "Connection") == 0 ||
+                strcmp(key, "Proxy-Connection") == 0 ||
+                strcmp(key, "User-Agent") == 0) {
+                continue;
+                }
+            sprintf(server_request, "%s%s", server_request, buf);
+        }
     }
-    printf("\n--------------\n");
 
-    
-  
+    sprintf(server_request, "%s%s", server_request, user_agent_hdr);
+    sprintf(server_request, "%sConnection: close\r\n", server_request);
+    sprintf(server_request, "%sProxy-Connection: close\r\n", server_request);
+    sprintf(server_request, "%s\r\n", server_request);
+
     Rio_writen(serverfd, server_request, strlen(server_request));
-    // 서버 소켓 닫기
+    
+
+    /* Client에게 전송 */
+    Rio_readinitb(&rio_server, serverfd);  // fd와 연관된 Robust I/O 읽기 버퍼 초기화
+
+    int readlen;
+    while((readlen = Rio_readlineb(&rio_server, buf, MAXLINE)) > 0){      
+      Rio_writen(fd, buf, readlen);
+      printf("%s",buf);
+    }
     Close(serverfd);
+
+
 }
