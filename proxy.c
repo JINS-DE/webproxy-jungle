@@ -10,15 +10,15 @@ static const char *user_agent_hdr =
     "Firefox/10.0.3\r\n";
 
 void doit(int fd);
-void server_request_header(uri);
+void *thread(void *vargp);
 
 // argc : 명령줄에서 전달된 인수의 개수 예시) ./tiny 8080 이면 argc는 2
 // argv : 명령줄에서 전달된 인수의 배열 argv[0]="./tiny" , argv[1]="8080"
 int main(int argc, char **argv) {
-  int listenfd, connfd;                   // listen 소켓과 클라이언트와의 연결 소켓을 저장할 변수
-  char hostname[MAXLINE], port[MAXLINE];  // 클라이언트의 호스트 이름과 포트 번호를 저장할 버퍼
+  int listenfd, *connfdp;                   // listen 소켓과 클라이언트와의 연결 소켓을 저장할 변수
   socklen_t clientlen;                    // 클라이언트 소켓 주소의 길이를 저장할 변수
   struct sockaddr_storage clientaddr;     // 클라이언트의 소켓 주소를 저장할 구조체 (IPv4, IPv6 모두를 지원)
+  pthread_t tid;
 
   // 실행 시 포트 번호가 제대로 전달되지 않으면 사용법을 출력하고 종료
   if (argc != 2) { 
@@ -29,16 +29,21 @@ int main(int argc, char **argv) {
 
   // 서버는 무한 루프
   while (1) {
-    clientlen = sizeof(clientaddr);                               // 클라이언트 주소 구조체의 크기 저장
-    connfd = Accept(listenfd, (SA *) &clientaddr, &clientlen);    // 클라이언트 연결을 받아들이고 새 소켓 식별자 반환
-    Getnameinfo((SA *)&clientaddr, clientlen, hostname, MAXLINE, port, MAXLINE,0);// 클라이언트의 호스트 이름과 포트 번호를 얻어옴
-    printf("Accepted connection from (%s, %s)\n", hostname, port);// 클라이언트 연결 정보 출력
-    doit(connfd);   // 클라이언트 연결 정보 출력
-    Close(connfd);  // 클라이언트와의 연결 소켓을 닫음
+    clientlen = sizeof(clientaddr);
+    connfdp = Malloc(sizeof(int));
+    *connfdp = Accept(listenfd, (SA *) &clientaddr, &clientlen);
+    Pthread_create(&tid, NULL, thread, connfdp);
   }
 }
+void *thread(void *vargp){
+  int connfd = *((int *)vargp);
+  Pthread_detach(pthread_self());
+  Free(vargp);
+  doit(connfd);
+  Close(connfd);
+  return NULL;
+}
 
-/*doit - client request를 처리해줌*/
 void doit(int fd) 
 {
     int serverfd;
