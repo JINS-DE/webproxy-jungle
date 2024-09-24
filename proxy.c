@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include "csapp.h"
+#include "cache.h"
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
@@ -48,7 +49,7 @@ void doit(int fd)
 {
     int serverfd;
     // request line에서 메서드, URI, 버전 정보를 저장할 변수들
-    char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE],host[MAXLINE],hostname[MAXLINE],path[MAXLINE],port[MAXLINE],server_request[MAXLINE], to_client_request[MAXLINE];
+    char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE],host[MAXLINE],hostname[MAXLINE],path[MAXLINE],port[MAXLINE],server_request[MAXLINE];
     // Robust I/O 버퍼 구조체
     rio_t rio_client, rio_server;
 
@@ -58,7 +59,14 @@ void doit(int fd)
 
     /* Client 요청 라인 파싱 */
     sscanf(buf, "%s %s %s", method, uri, version); // 공백으로 구분해서 요청 라인을 파싱하여 메서드, URI, 버전 저장
-    
+
+    // 캐시에서 요청한 URI가 있는지 확인 
+    const char *cached_obj = cache_get(uri);
+    if (cached_obj!=NULL){
+      Rio_writen(fd,cached_obj,strlen(cached_obj));
+      return;
+    }
+
     // "http://%[^/]%s" 의 의미 : http://부터~ , %[^/] : '/'나오기 전에 문자 전부, %s : %[^/]이후에 나머지
     sscanf(uri, "http://%[^/]%s", host, path);  // host: localhost:8000, path: ''
     sscanf(host, "%[^:]:%s",hostname,port);     // hostname:localhost, port:8000
@@ -72,7 +80,7 @@ void doit(int fd)
         return;
     }
 
-    // 요청 헤더 처리
+    // proxy->tiny 요청 헤더 처리
     sprintf(server_request, "%s %s HTTP/1.0\r\n", method, path);
     sprintf(server_request, "%sHost: %s\r\n", server_request, hostname);
 
@@ -89,6 +97,7 @@ void doit(int fd)
 
             *colon_pos = ':'; // ':'를 다시 복구
 
+            // Host ~ User-Agent는 아래에 sprintf로 지정된 헤더를 입력 할 것이다.
             if (strcmp(key, "Host") == 0 ||
               strcmp(key, "Connection") == 0 ||
                 strcmp(key, "Proxy-Connection") == 0 ||
@@ -104,18 +113,40 @@ void doit(int fd)
     sprintf(server_request, "%sProxy-Connection: close\r\n", server_request);
     sprintf(server_request, "%s\r\n", server_request);
 
+    // 요청을 tiny 서버로 전달
     Rio_writen(serverfd, server_request, strlen(server_request));
-    
+    // ----------------- 프록시 -> 서버 write 끝----------------
 
     /* Client에게 전송 */
     Rio_readinitb(&rio_server, serverfd);  // fd와 연관된 Robust I/O 읽기 버퍼 초기화
 
-    int readlen;
-    while((readlen = Rio_readlineb(&rio_server, buf, MAXLINE)) > 0){      
-      Rio_writen(fd, buf, readlen);
-      printf("%s",buf);
+    // int readlen;
+    // while((readlen = Rio_readlineb(&rio_server, buf, MAXLINE)) > 0){      
+    //   Rio_writen(fd, buf, readlen);
+    //   printf("%s",buf);
+    // }
+    // Close(serverfd);
+
+
+    size_t n;
+    char object_buf[MAX_OBJECT_SIZE];
+    size_t total_size = 0;
+    
+    // 응답을 클라이언트로 전송하면서 동시에 버퍼에 저장
+    while ((n = Rio_readlineb(&rio_server, buf, MAXLINE)) > 0) {
+        Rio_writen(fd, buf, n);
+        if (total_size + n < MAX_OBJECT_SIZE) {
+            memcpy(object_buf + total_size, buf, n);
+            total_size += n;
+        }
     }
+
+    // 캐시에 저장할 수 있는 경우
+    if (total_size < MAX_OBJECT_SIZE) {
+        cache_put(uri, object_buf, total_size);
+    }
+
     Close(serverfd);
-
-
 }
+
+
